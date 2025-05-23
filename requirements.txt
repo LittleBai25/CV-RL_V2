@@ -1,10 +1,10 @@
 streamlit
-pandas==2.1.3
-openpyxl==3.1.2
-PyPDF2==3.0.1
+pandas
+openpyxl
+PyPDF2
 python-docx
-requests==2.31.0
-Pillow==10.1.0
+requests
+Pillow
 markitdown[all]
 langgraph
 langchain
@@ -22,8 +22,8 @@ mcp
 python-dotenv
 aiohttp
 PyMuPDF
-crewai== 0.36.0
-crewai-tools==0.4.7
+crewai
+crewai-tools
 chromadb
 openpyxl
 xlsxwriter
