@@ -13,6 +13,7 @@ import os
 from langsmith import Client
 import uuid
 from datetime import datetime
+import time
 
 class ChatState(TypedDict):
     messages: List[BaseMessage]
@@ -273,98 +274,149 @@ def read_file(file):
     except Exception as e:
         return f"[MarkItDown 解析失败: {e}]"
 
+# 生成推荐信的函数
+def generate_recommendation_letter(report):
+    """根据报告生成正式的推荐信"""
+    if "letter_generator_persona" not in st.session_state:
+        st.session_state.letter_generator_persona = """你是一位经验丰富的推荐信写作专家，专门负责从分析报告生成最终的推荐信。你擅长将详细的分析转化为专业、有力且符合学术惯例的推荐信。"""
+    if "letter_generator_task" not in st.session_state:
+        st.session_state.letter_generator_task = """请根据提供的推荐信报告内容，生成一封正式、专业的推荐信。你的任务是：
+1. 仔细阅读报告中的所有内容，特别注意已经标记为【补充】的部分
+2. 保持原报告的核心内容和关键事例，但以更专业、更正式的语言重新表述
+3. 消除所有【补充：xxx】标记，将其内容无缝融入推荐信中
+4. 确保推荐信语气专业、积极，且符合学术推荐信的写作规范
+5. 维持推荐信的四段结构：介绍关系、学术/工作表现、个人品质、总结推荐
+6. 润色语言，使推荐信更加流畅、连贯、有说服力"""
+    if "letter_generator_output_format" not in st.session_state:
+        st.session_state.letter_generator_output_format = """请输出一封完整的推荐信，直接从正文开始（无需包含信头如日期和收信人），以"尊敬的招生委员会："开头，以"此致 敬礼"结尾，并在最后添加推荐人姓名。请不要包含任何【补充】标记。"""
+    
+    # 使用用户选择的模型
+    if "selected_letter_generator_model" not in st.session_state:
+        model_list = get_model_list()
+        st.session_state.selected_letter_generator_model = model_list[0]
+    
+    # 构建系统提示和用户提示
+    system_prompt = f"{st.session_state.letter_generator_persona}\n\n{st.session_state.letter_generator_task}\n\n{st.session_state.letter_generator_output_format}"
+    user_prompt = f"根据以下报告生成正式的推荐信：\n\n{report}"
+    
+    # 调用API
+    start_time = time.time()
+    with st.spinner("正在生成推荐信..."):
+        try:
+            result = get_completion(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=st.session_state.selected_letter_generator_model,
+                temperature=0.7,
+            )
+            end_time = time.time()
+            generation_time = end_time - start_time
+            st.session_state.recommendation_letter = result.content
+            return result.content, generation_time
+        except Exception as e:
+            st.error(f"生成推荐信时出错: {str(e)}")
+            return None, 0
+
 # 处理模型调用
 def process_with_model(support_analyst_model, rl_assistant_model, rl_content, support_files_content, 
                       persona, task, output_format, 
                       support_analyst_persona, support_analyst_task, support_analyst_output_format,
                       writing_requirements=""):
     # 主运行ID
-    main_run_id = str(uuid.uuid4())
-    # 检查是否有支持文件
-    has_support_files = len(support_files_content) > 0
+    master_run_id = str(uuid.uuid4())
+    
     # 显示处理进度
     progress_bar = st.progress(0)
     status_text = st.empty()
+    
     try:
-        # 1. 如果有支持文件，先用支持文件分析agent处理
-        support_analysis_result = ""
-        if has_support_files:
-            status_text.text("第一阶段：正在分析支持文件...")
-            # 准备支持文件的内容
-            support_files_text = ""
-            for i, content in enumerate(support_files_content):
-                support_files_text += f"--- 文件 {i+1} ---\n{content}\n\n"
-            # 构建支持文件分析agent的提示词
-            support_prompt = f"""人物设定：{support_analyst_persona}
+        start_time = datetime.now()
+        
+        # 步骤1: 处理支持文件
+        status_text.text("第一步：分析支持文件...")
+        progress_bar.progress(10)
+        
+        # 构建支持文件分析提示词
+        support_files_text = ""
+        for i, content in enumerate(support_files_content):
+            support_files_text += f"\n\n支持文件{i+1}:\n{content}"
+        
+        support_prompt = f"""人物设定：{support_analyst_persona}
 \n任务描述：{support_analyst_task}
 \n输出格式：{support_analyst_output_format}
+\n推荐信素材表内容：
+{rl_content}
 \n支持文件内容：
 {support_files_text}
 """
-            # 调用支持文件分析agent
-            support_analysis_result = run_agent(
-                "supporting_doc_analyst",
-                support_analyst_model,
-                support_prompt,
-                main_run_id
-            )
-            progress_bar.progress(50)
-            status_text.text("第一阶段完成：支持文件分析完毕")
-        else:
-            progress_bar.progress(50)
-            status_text.text("未提供支持文件，跳过第一阶段分析")
-        # 2. 准备RL助理的输入
-        status_text.text("第二阶段：正在生成RL报告...")
-        # 准备RL素材内容
-        file_contents = f"RL素材内容:\n{rl_content}\n\n"
-        # 如果有支持文件分析结果，添加到提示中
-        if has_support_files and support_analysis_result:
-            file_contents += f"支持文件分析结果:\n{support_analysis_result}\n\n"
-        # 或者直接添加原始支持文件内容（如果没有分析结果但有支持文件）
-        elif has_support_files:
-            file_contents += "支持文件内容:\n"
-            for i, content in enumerate(support_files_content):
-                file_contents += f"--- 文件 {i+1} ---\n{content}\n\n"
         
-        # 如果有用户写作需求，添加到提示中
-        user_requirements = ""
-        if writing_requirements:
-            user_requirements = f"\n用户写作需求:\n{writing_requirements}\n"
-            
-        # 构建最终的RL助理提示词
+        # 调用支持文件分析agent
+        support_analysis = run_agent(
+            "support_analyst", 
+            support_analyst_model,
+            support_prompt,
+            master_run_id
+        )
+        st.session_state.support_analysis = support_analysis
+        
+        progress_bar.progress(40)
+        status_text.text("第二步：生成推荐信报告...")
+        
+        # 步骤2: 生成推荐信报告
         rl_prompt = f"""人物设定：{persona}
-\n任务描述：{task}{user_requirements}
+\n任务描述：{task}
 \n输出格式：{output_format}
-\n文件内容：
-{file_contents}
+\n推荐信素材表内容：
+{rl_content}
+\n支持文件分析：
+{support_analysis}
+\n写作需求：
+{writing_requirements}
 """
-        # 调用RL助理agent
-        final_result = run_agent(
+        
+        report = run_agent(
             "rl_assistant", 
             rl_assistant_model,
             rl_prompt,
-            main_run_id
+            master_run_id
         )
+        st.session_state.report = report
+        
+        # 计算总耗时
+        end_time = datetime.now()
+        total_time = (end_time - start_time).total_seconds()
+        
         progress_bar.progress(100)
         status_text.text("处理完成！")
-        # 显示结果
-        st.markdown(final_result, unsafe_allow_html=True)
         
-        # 保存报告结果到session_state，以便后续生成推荐信
-        st.session_state.last_report_result = final_result
+        # 保存处理时间到session状态
+        st.session_state.report_processing_time = total_time
         
-        # 添加"生成推荐信"按钮
-        if st.button("生成推荐信", key="generate_letter_btn"):
-            generate_recommendation_letter(final_result)
-
-        # 显示LangSmith链接（如果启用）
-        if langsmith_api_key:
-            langsmith_base_url = st.secrets.get("LANGSMITH_BASE_URL", "https://smith.langchain.com")
-            langsmith_url = f"{langsmith_base_url}/projects/{langsmith_project}/runs/{main_run_id}"
-            st.info(f"在LangSmith中查看此运行: [打开监控面板]({langsmith_url})")
+        # 显示处理结果
+        st.success(f"报告生成成功！总耗时 {int(total_time)} 秒")
+        st.session_state.processing_complete = True
+        st.session_state.current_view = "report"
+            
+        # 添加生成推荐信按钮
+        if st.button("生成正式推荐信", key="generate_recommendation_letter", use_container_width=True):
+            letter, letter_gen_time = generate_recommendation_letter(report)
+            if letter:
+                st.session_state.recommendation_letter = letter
+                st.session_state.recommendation_letter_generated = True
+                st.session_state.letter_generation_time = letter_gen_time
+                st.success(f"推荐信已生成，用时 {letter_gen_time:.2f} 秒")
+                st.session_state.current_view = "recommendation_letter"
+                
+                # 创建报告和正式推荐信的标签页
+                report_tab, letter_tab = st.tabs(["分析报告", "最终推荐信"])
+                with report_tab:
+                    st.markdown(report)
+                with letter_tab:
+                    st.markdown(letter)
+    
     except Exception as e:
         progress_bar.progress(100)
-        status_text.text("处理出错！")
+        status_text.text("处理失败！")
         st.error(f"处理失败: {str(e)}")
         st.error("详细错误信息：")
         import traceback
@@ -571,106 +623,12 @@ with TAB1:
 with TAB2:
     st.title("提示词调试")
     
-    # 创建三个子标签页
-    subtab1, subtab2, subtab3 = st.tabs(["文档分析Agent", "推荐信助手Agent", "推荐信生成Agent"])
-    
-    # 第一个子标签：文档分析Agent
-    with subtab1:
-        # 模型选择部分
-        st.subheader("模型选择")
-        model_list = get_model_list()
-        selected_support_analyst_model = st.selectbox(
-            "选择文档分析使用的模型", 
-            model_list,
-            index=model_list.index(st.session_state.selected_support_analyst_model) if st.session_state.selected_support_analyst_model in model_list else 0,
-            key="support_analyst_model_select"
-        )
-        st.session_state.selected_support_analyst_model = selected_support_analyst_model
-        
-        # 提示词设置部分
-        st.subheader("提示词设置")
+    st.subheader("第一步：支持文件分析 Agent")
+    col1_1, col1_2 = st.columns(2)
+    with col1_1:
         st.text_area("人物设定", key="support_analyst_persona_debug", value=st.session_state.support_analyst_persona, height=200)
+    with col1_2:
         st.text_area("任务描述", key="support_analyst_task_debug", value=st.session_state.support_analyst_task, height=200)
-        st.text_area("输出格式", key="support_analyst_output_format_debug", value=st.session_state.support_analyst_output_format, height=150)
-        
-        # 保存按钮
-        if st.button("保存提示词设置", key="save_support_analyst", use_container_width=True):
-            st.session_state.support_analyst_persona = st.session_state.support_analyst_persona_debug
-            st.session_state.support_analyst_task = st.session_state.support_analyst_task_debug
-            st.session_state.support_analyst_output_format = st.session_state.support_analyst_output_format_debug
-            save_prompts()
-            st.success("文档分析Agent提示词已保存")
-    
-    # 第二个子标签：推荐信助手Agent
-    with subtab2:
-        # 模型选择部分
-        st.subheader("模型选择")
-        model_list = get_model_list()
-        selected_rl_assistant_model = st.selectbox(
-            "选择推荐信助手使用的模型", 
-            model_list,
-            index=model_list.index(st.session_state.selected_rl_assistant_model) if st.session_state.selected_rl_assistant_model in model_list else 0,
-            key="rl_assistant_model_select"
-        )
-        st.session_state.selected_rl_assistant_model = selected_rl_assistant_model
-        
-        # 提示词设置部分
-        st.subheader("提示词设置")
-        st.text_area("人物设定", key="persona_debug", value=st.session_state.persona, height=200)
-        st.text_area("任务描述", key="task_debug", value=st.session_state.task, height=200)
-        st.text_area("输出格式", key="output_format_debug", value=st.session_state.output_format, height=150)
-        
-        # 保存按钮
-        if st.button("保存提示词设置", key="save_rl_assistant", use_container_width=True):
-            st.session_state.persona = st.session_state.persona_debug
-            st.session_state.task = st.session_state.task_debug
-            st.session_state.output_format = st.session_state.output_format_debug
-            save_prompts()
-            st.success("推荐信助手Agent提示词已保存")
-    
-    # 第三个子标签：推荐信生成Agent
-    with subtab3:
-        # 模型选择部分
-        st.subheader("模型选择")
-        model_list = get_model_list()
-        # 为第三个agent添加模型选择
-        if "selected_letter_generator_model" not in st.session_state:
-            st.session_state.selected_letter_generator_model = model_list[0]
-        
-        selected_letter_generator_model = st.selectbox(
-            "选择推荐信生成使用的模型", 
-            model_list,
-            index=model_list.index(st.session_state.selected_letter_generator_model) if st.session_state.selected_letter_generator_model in model_list else 0,
-            key="letter_generator_model_select"
-        )
-        st.session_state.selected_letter_generator_model = selected_letter_generator_model
-        
-        # 为第三个agent添加session_state变量
-        if "letter_generator_persona" not in st.session_state:
-            st.session_state.letter_generator_persona = """你是一位经验丰富的推荐信写作专家，专门负责从分析报告生成最终的推荐信。你擅长将详细的分析转化为专业、有力且符合学术惯例的推荐信。"""
-        if "letter_generator_task" not in st.session_state:
-            st.session_state.letter_generator_task = """请根据提供的推荐信报告内容，生成一封正式、专业的推荐信。你的任务是：
-1. 仔细阅读报告中的所有内容，特别注意已经标记为【补充】的部分
-2. 保持原报告的核心内容和关键事例，但以更专业、更正式的语言重新表述
-3. 消除所有【补充：xxx】标记，将其内容无缝融入推荐信中
-4. 确保推荐信语气专业、积极，且符合学术推荐信的写作规范
-5. 维持推荐信的四段结构：介绍关系、学术/工作表现、个人品质、总结推荐
-6. 润色语言，使推荐信更加流畅、连贯、有说服力"""
-        if "letter_generator_output_format" not in st.session_state:
-            st.session_state.letter_generator_output_format = """请输出一封完整的推荐信，直接从正文开始（无需包含信头如日期和收信人），以"尊敬的招生委员会："开头，以"此致 敬礼"结尾，并在最后添加推荐人姓名。请不要包含任何【补充】标记。"""
-        
-        # 提示词设置部分
-        st.subheader("提示词设置")
-        st.text_area("人物设定", key="letter_generator_persona_debug", value=st.session_state.letter_generator_persona, height=200)
-        st.text_area("任务描述", key="letter_generator_task_debug", value=st.session_state.letter_generator_task, height=200)
-        st.text_area("输出格式", key="letter_generator_output_format_debug", value=st.session_state.letter_generator_output_format, height=150)
-        
-        # 保存按钮
-        if st.button("保存提示词设置", key="save_letter_generator", use_container_width=True):
-            st.session_state.letter_generator_persona = st.session_state.letter_generator_persona_debug
-            st.session_state.letter_generator_task = st.session_state.letter_generator_task_debug
-            st.session_state.letter_generator_output_format = st.session_state.letter_generator_output_format_debug
-            save_prompts()
     st.text_area("输出格式", key="support_analyst_output_format_debug", value=st.session_state.support_analyst_output_format, height=150)
     if st.button("保存支持文件分析提示词", key="save_support_analyst"):
         st.session_state.support_analyst_persona = st.session_state.support_analyst_persona_debug
@@ -777,55 +735,3 @@ with TAB3:
     else:
         st.warning("LangSmith未配置")
         st.info("如需启用AI监控，请设置LANGSMITH_API_KEY")
-
-# 新增函数：生成最终推荐信
-def generate_recommendation_letter(report_content):
-    # 显示处理进度
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    try:
-        # 主运行ID
-        letter_run_id = str(uuid.uuid4())
-        
-        status_text.text("正在生成最终推荐信...")
-        
-        # 使用第三个agent的模型或默认模型
-        letter_generator_model = st.session_state.get("selected_letter_generator_model", get_model_list()[0])
-        
-        # 构建推荐信生成提示词
-        letter_prompt = f"""人物设定：{st.session_state.letter_generator_persona}
-\n任务描述：{st.session_state.letter_generator_task}
-\n输出格式：{st.session_state.letter_generator_output_format}
-\n报告内容：
-{report_content}
-"""
-        
-        # 调用推荐信生成agent
-        letter_result = run_agent(
-            "letter_generator", 
-            letter_generator_model,
-            letter_prompt,
-            letter_run_id
-        )
-        
-        progress_bar.progress(100)
-        status_text.text("推荐信生成完成！")
-        
-        # 显示结果
-        st.subheader("最终推荐信")
-        st.markdown(letter_result, unsafe_allow_html=True)
-        
-        # 显示LangSmith链接（如果启用）
-        if langsmith_api_key:
-            langsmith_base_url = st.secrets.get("LANGSMITH_BASE_URL", "https://smith.langchain.com")
-            langsmith_url = f"{langsmith_base_url}/projects/{langsmith_project}/runs/{letter_run_id}"
-            st.info(f"在LangSmith中查看此运行: [打开监控面板]({langsmith_url})")
-    
-    except Exception as e:
-        progress_bar.progress(100)
-        status_text.text("推荐信生成出错！")
-        st.error(f"处理失败: {str(e)}")
-        st.error("详细错误信息：")
-        import traceback
-        st.code(traceback.format_exc())
