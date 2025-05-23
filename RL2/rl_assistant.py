@@ -492,9 +492,6 @@ def run_agent(agent_name, model, prompt, parent_run_id=None):
             st.warning(f"LangSmith更新运行结果失败: {str(e)}")
     return result.content
 
-# Tab布局 - 修改为只显示两个标签页，隐藏设置页
-TAB1, TAB3 = st.tabs(["文件上传与分析", "系统状态"])
-
 # Tab布局 - 增加TAB2用于提示词调试
 TAB1, TAB2, TAB3 = st.tabs(["文件上传与分析", "提示词调试", "系统状态"])
 
