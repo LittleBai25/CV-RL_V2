@@ -571,12 +571,106 @@ with TAB1:
 with TAB2:
     st.title("提示词调试")
     
-    st.subheader("第一步：支持文件分析 Agent")
-    col1_1, col1_2 = st.columns(2)
-    with col1_1:
+    # 创建三个子标签页
+    subtab1, subtab2, subtab3 = st.tabs(["文档分析Agent", "推荐信助手Agent", "推荐信生成Agent"])
+    
+    # 第一个子标签：文档分析Agent
+    with subtab1:
+        # 模型选择部分
+        st.subheader("模型选择")
+        model_list = get_model_list()
+        selected_support_analyst_model = st.selectbox(
+            "选择文档分析使用的模型", 
+            model_list,
+            index=model_list.index(st.session_state.selected_support_analyst_model) if st.session_state.selected_support_analyst_model in model_list else 0,
+            key="support_analyst_model_select"
+        )
+        st.session_state.selected_support_analyst_model = selected_support_analyst_model
+        
+        # 提示词设置部分
+        st.subheader("提示词设置")
         st.text_area("人物设定", key="support_analyst_persona_debug", value=st.session_state.support_analyst_persona, height=200)
-    with col1_2:
         st.text_area("任务描述", key="support_analyst_task_debug", value=st.session_state.support_analyst_task, height=200)
+        st.text_area("输出格式", key="support_analyst_output_format_debug", value=st.session_state.support_analyst_output_format, height=150)
+        
+        # 保存按钮
+        if st.button("保存提示词设置", key="save_support_analyst", use_container_width=True):
+            st.session_state.support_analyst_persona = st.session_state.support_analyst_persona_debug
+            st.session_state.support_analyst_task = st.session_state.support_analyst_task_debug
+            st.session_state.support_analyst_output_format = st.session_state.support_analyst_output_format_debug
+            save_prompts()
+            st.success("文档分析Agent提示词已保存")
+    
+    # 第二个子标签：推荐信助手Agent
+    with subtab2:
+        # 模型选择部分
+        st.subheader("模型选择")
+        model_list = get_model_list()
+        selected_rl_assistant_model = st.selectbox(
+            "选择推荐信助手使用的模型", 
+            model_list,
+            index=model_list.index(st.session_state.selected_rl_assistant_model) if st.session_state.selected_rl_assistant_model in model_list else 0,
+            key="rl_assistant_model_select"
+        )
+        st.session_state.selected_rl_assistant_model = selected_rl_assistant_model
+        
+        # 提示词设置部分
+        st.subheader("提示词设置")
+        st.text_area("人物设定", key="persona_debug", value=st.session_state.persona, height=200)
+        st.text_area("任务描述", key="task_debug", value=st.session_state.task, height=200)
+        st.text_area("输出格式", key="output_format_debug", value=st.session_state.output_format, height=150)
+        
+        # 保存按钮
+        if st.button("保存提示词设置", key="save_rl_assistant", use_container_width=True):
+            st.session_state.persona = st.session_state.persona_debug
+            st.session_state.task = st.session_state.task_debug
+            st.session_state.output_format = st.session_state.output_format_debug
+            save_prompts()
+            st.success("推荐信助手Agent提示词已保存")
+    
+    # 第三个子标签：推荐信生成Agent
+    with subtab3:
+        # 模型选择部分
+        st.subheader("模型选择")
+        model_list = get_model_list()
+        # 为第三个agent添加模型选择
+        if "selected_letter_generator_model" not in st.session_state:
+            st.session_state.selected_letter_generator_model = model_list[0]
+        
+        selected_letter_generator_model = st.selectbox(
+            "选择推荐信生成使用的模型", 
+            model_list,
+            index=model_list.index(st.session_state.selected_letter_generator_model) if st.session_state.selected_letter_generator_model in model_list else 0,
+            key="letter_generator_model_select"
+        )
+        st.session_state.selected_letter_generator_model = selected_letter_generator_model
+        
+        # 为第三个agent添加session_state变量
+        if "letter_generator_persona" not in st.session_state:
+            st.session_state.letter_generator_persona = """你是一位经验丰富的推荐信写作专家，专门负责从分析报告生成最终的推荐信。你擅长将详细的分析转化为专业、有力且符合学术惯例的推荐信。"""
+        if "letter_generator_task" not in st.session_state:
+            st.session_state.letter_generator_task = """请根据提供的推荐信报告内容，生成一封正式、专业的推荐信。你的任务是：
+1. 仔细阅读报告中的所有内容，特别注意已经标记为【补充】的部分
+2. 保持原报告的核心内容和关键事例，但以更专业、更正式的语言重新表述
+3. 消除所有【补充：xxx】标记，将其内容无缝融入推荐信中
+4. 确保推荐信语气专业、积极，且符合学术推荐信的写作规范
+5. 维持推荐信的四段结构：介绍关系、学术/工作表现、个人品质、总结推荐
+6. 润色语言，使推荐信更加流畅、连贯、有说服力"""
+        if "letter_generator_output_format" not in st.session_state:
+            st.session_state.letter_generator_output_format = """请输出一封完整的推荐信，直接从正文开始（无需包含信头如日期和收信人），以"尊敬的招生委员会："开头，以"此致 敬礼"结尾，并在最后添加推荐人姓名。请不要包含任何【补充】标记。"""
+        
+        # 提示词设置部分
+        st.subheader("提示词设置")
+        st.text_area("人物设定", key="letter_generator_persona_debug", value=st.session_state.letter_generator_persona, height=200)
+        st.text_area("任务描述", key="letter_generator_task_debug", value=st.session_state.letter_generator_task, height=200)
+        st.text_area("输出格式", key="letter_generator_output_format_debug", value=st.session_state.letter_generator_output_format, height=150)
+        
+        # 保存按钮
+        if st.button("保存提示词设置", key="save_letter_generator", use_container_width=True):
+            st.session_state.letter_generator_persona = st.session_state.letter_generator_persona_debug
+            st.session_state.letter_generator_task = st.session_state.letter_generator_task_debug
+            st.session_state.letter_generator_output_format = st.session_state.letter_generator_output_format_debug
+            save_prompts()
     st.text_area("输出格式", key="support_analyst_output_format_debug", value=st.session_state.support_analyst_output_format, height=150)
     if st.button("保存支持文件分析提示词", key="save_support_analyst"):
         st.session_state.support_analyst_persona = st.session_state.support_analyst_persona_debug
@@ -696,8 +790,8 @@ def generate_recommendation_letter(report_content):
         
         status_text.text("正在生成最终推荐信...")
         
-        # 使用默认模型或用户选择的模型
-        letter_generator_model = st.session_state.get("selected_rl_assistant_model", get_model_list()[0])
+        # 使用第三个agent的模型或默认模型
+        letter_generator_model = st.session_state.get("selected_letter_generator_model", get_model_list()[0])
         
         # 构建推荐信生成提示词
         letter_prompt = f"""人物设定：{st.session_state.letter_generator_persona}
