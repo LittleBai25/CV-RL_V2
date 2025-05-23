@@ -221,49 +221,17 @@ def get_model_list():
     else:
         return ["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324:free", "qwen-turbo", "其它模型..."]
 
-# 保存提示词到文件
+# 保存提示词到Streamlit session state（立即生效）
 def save_prompts():
-    prompts = {
-        "persona": st.session_state.persona,
-        "task": st.session_state.task,
-        "output_format": st.session_state.output_format,
-        # 新增：支持文件分析agent的提示词
-        "support_analyst_persona": st.session_state.support_analyst_persona,
-        "support_analyst_task": st.session_state.support_analyst_task,
-        "support_analyst_output_format": st.session_state.support_analyst_output_format,
-        # 新增：推荐信生成agent的提示词
-        "letter_generator_persona": st.session_state.letter_generator_persona if "letter_generator_persona" in st.session_state else "",
-        "letter_generator_task": st.session_state.letter_generator_task if "letter_generator_task" in st.session_state else "",
-        "letter_generator_output_format": st.session_state.letter_generator_output_format if "letter_generator_output_format" in st.session_state else ""
-    }
-    # 创建保存目录
-    os.makedirs("prompts", exist_ok=True)
-    with open("prompts/saved_prompts.json", "w", encoding="utf-8") as f:
-        json.dump(prompts, f, ensure_ascii=False, indent=2)
+    # 直接在session state中保存，立即生效
+    # 不需要文件操作，修改后立即可用
     return True
 
-# 加载保存的提示词
+# 加载保存的提示词（从session state，无需文件操作）
 def load_prompts():
-    try:
-        if os.path.exists("prompts/saved_prompts.json"):
-            with open("prompts/saved_prompts.json", "r", encoding="utf-8") as f:
-                prompts = json.load(f)
-                st.session_state.persona = prompts.get("persona", st.session_state.persona)
-                st.session_state.task = prompts.get("task", st.session_state.task)
-                st.session_state.output_format = prompts.get("output_format", st.session_state.output_format)
-                # 新增：支持文件分析agent的提示词
-                st.session_state.support_analyst_persona = prompts.get("support_analyst_persona", st.session_state.support_analyst_persona)
-                st.session_state.support_analyst_task = prompts.get("support_analyst_task", st.session_state.support_analyst_task)
-                st.session_state.support_analyst_output_format = prompts.get("support_analyst_output_format", st.session_state.support_analyst_output_format)
-                # 新增：推荐信生成agent的提示词
-                st.session_state.letter_generator_persona = prompts.get("letter_generator_persona", st.session_state.letter_generator_persona)
-                st.session_state.letter_generator_task = prompts.get("letter_generator_task", st.session_state.letter_generator_task)
-                st.session_state.letter_generator_output_format = prompts.get("letter_generator_output_format", st.session_state.letter_generator_output_format)
-            return True
-        return False
-    except Exception as e:
-        st.error(f"加载提示词失败: {str(e)}")
-        return False
+    # 所有提示词都已经在session state中初始化
+    # 这个函数保留用于未来扩展
+    return True
 
 # 读取文件内容函数
 def read_file(file):
@@ -688,8 +656,8 @@ with TAB2:
             st.session_state.support_analyst_persona = st.session_state.support_analyst_persona_editor
             st.session_state.support_analyst_task = st.session_state.support_analyst_task_editor
             st.session_state.support_analyst_output_format = st.session_state.support_analyst_output_format_editor
-            save_prompts()
-            st.success("支持文件分析Agent设置已保存")
+            st.success("✅ 支持文件分析Agent设置已保存并立即生效")
+            st.info("💡 提示：修改将在下次运行时使用新的提示词")
     
     with agent2:
         st.subheader("推荐信助手Agent提示词调试")
@@ -733,8 +701,8 @@ with TAB2:
             st.session_state.persona = st.session_state.persona_editor
             st.session_state.task = st.session_state.task_editor
             st.session_state.output_format = st.session_state.output_format_editor
-            save_prompts()
-            st.success("推荐信助手Agent设置已保存")
+            st.success("✅ 推荐信助手Agent设置已保存并立即生效")
+            st.info("💡 提示：修改将在下次运行时使用新的提示词")
     
     with agent3:
         st.subheader("推荐信生成Agent提示词调试")
@@ -794,8 +762,8 @@ with TAB2:
             st.session_state.letter_generator_persona = st.session_state.letter_generator_persona_editor
             st.session_state.letter_generator_task = st.session_state.letter_generator_task_editor
             st.session_state.letter_generator_output_format = st.session_state.letter_generator_output_format_editor
-            save_prompts()
-            st.success("推荐信生成Agent设置已保存")
+            st.success("✅ 推荐信生成Agent设置已保存并立即生效")
+            st.info("💡 提示：修改将在下次运行时使用新的提示词")
 
 # 确保在应用启动时加载默认提示词
 load_prompts()
