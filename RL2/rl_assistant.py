@@ -279,20 +279,52 @@ def generate_recommendation_letter(report):
     system_prompt = f"{st.session_state.letter_generator_persona}\n\n{st.session_state.letter_generator_task}\n\n{st.session_state.letter_generator_output_format}"
     user_prompt = f"根据以下报告生成正式的推荐信：\n\n{report}"
     
-    # 调用API
+    # 调用API (使用run_agent以确保LangSmith追踪)
     start_time = time.time()
     with st.spinner("正在生成推荐信..."):
         try:
-            result = get_completion(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                model=st.session_state.selected_letter_generator_model,
-                temperature=0.7,
+            # 构建完整的提示词
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            
+            # 生成主运行ID
+            master_run_id = str(uuid.uuid4())
+            
+            # 在LangSmith中记录主运行开始（如果启用）
+            if langsmith_client:
+                try:
+                    langsmith_client.create_run(
+                        name="推荐信生成",
+                        run_type="chain",
+                        inputs={"report": report[:500] + "..." if len(report) > 500 else report},
+                        project_name=langsmith_project,
+                        run_id=master_run_id,
+                        extra={"model": st.session_state.selected_letter_generator_model}
+                    )
+                except Exception as e:
+                    st.warning(f"LangSmith主运行创建失败: {str(e)}")
+            
+            result_content = run_agent(
+                "letter_generator", 
+                st.session_state.selected_letter_generator_model,
+                full_prompt,
+                master_run_id
             )
+            
+            # 在LangSmith中记录主运行结束（如果启用）
+            if langsmith_client:
+                try:
+                    langsmith_client.update_run(
+                        run_id=master_run_id,
+                        outputs={"recommendation_letter": result_content[:500] + "..." if len(result_content) > 500 else result_content},
+                        end_time=datetime.now()
+                    )
+                except Exception as e:
+                    st.warning(f"LangSmith主运行更新失败: {str(e)}")
+            
             end_time = time.time()
             generation_time = end_time - start_time
-            st.session_state.recommendation_letter = result.content
-            return result.content, generation_time
+            st.session_state.recommendation_letter = result_content
+            return result_content, generation_time
         except Exception as e:
             st.error(f"生成推荐信时出错: {str(e)}")
             return None, 0
@@ -410,23 +442,26 @@ def run_agent(agent_name, model, prompt, parent_run_id=None):
     # 创建agent运行ID
     agent_run_id = str(uuid.uuid4())
     # 在LangSmith中记录agent运行开始（如果启用）
-    if langsmith_client and parent_run_id:
+    if langsmith_client:
         try:
             metadata = {
                 "model": model,
                 "agent": agent_name,
-                "timestamp": datetime.now()
+                "timestamp": datetime.now().isoformat()
             }
             # 记录agent运行
-            langsmith_client.create_run(
-                name=f"{agent_name}",
-                run_type="chain",
-                inputs={"prompt": prompt},
-                project_name=langsmith_project,
-                run_id=agent_run_id,
-                parent_run_id=parent_run_id,
-                extra=metadata
-            )
+            create_run_params = {
+                "name": f"{agent_name}",
+                "run_type": "llm",
+                "inputs": {"prompt": prompt[:1000] + "..." if len(prompt) > 1000 else prompt},
+                "project_name": langsmith_project,
+                "run_id": agent_run_id,
+                "extra": metadata
+            }
+            if parent_run_id:
+                create_run_params["parent_run_id"] = parent_run_id
+            
+            langsmith_client.create_run(**create_run_params)
         except Exception as e:
             st.warning(f"LangSmith运行创建失败: {str(e)}")
     # 创建 LLM 实例
@@ -435,17 +470,19 @@ def run_agent(agent_name, model, prompt, parent_run_id=None):
         base_url="https://openrouter.ai/api/v1",
         model=model,
         temperature=0.7,
+        # 确保LangSmith追踪配置正确传递
+        model_name=model,  # 明确指定模型名称用于追踪
     )
     # 使用 langchain 的 ChatOpenAI 处理信息
     messages = [HumanMessage(content=prompt)]
     result = llm.invoke(messages)
-    # 在LangSmith中记录LLM调用（如果启用）
-    if langsmith_client and parent_run_id:
+    # 在LangSmith中记录LLM调用结果（如果启用）
+    if langsmith_client:
         try:
             # 更新agent运行结果
             langsmith_client.update_run(
                 run_id=agent_run_id,
-                outputs={"response": result.content},
+                outputs={"response": result.content[:1000] + "..." if len(result.content) > 1000 else result.content},
                 end_time=datetime.now()
             )
         except Exception as e:
@@ -829,21 +866,62 @@ with TAB3:
     
     # 显示LangSmith连接状态
     st.subheader("LangSmith监控")
+    
+    # 显示详细的配置状态
+    st.write("**配置检查:**")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if langsmith_api_key:
+            st.success("✅ LANGSMITH_API_KEY 已配置")
+        else:
+            st.error("❌ LANGSMITH_API_KEY 未配置")
+    
+    with col2:
+        st.info(f"📁 项目名称: {langsmith_project}")
+    
+    # 显示环境变量状态
+    st.write("**环境变量状态:**")
+    env_vars = [
+        ("LANGCHAIN_TRACING_V2", os.environ.get("LANGCHAIN_TRACING_V2", "未设置")),
+        ("LANGCHAIN_API_KEY", "已设置" if os.environ.get("LANGCHAIN_API_KEY") else "未设置"),
+        ("LANGCHAIN_PROJECT", os.environ.get("LANGCHAIN_PROJECT", "未设置"))
+    ]
+    
+    for var_name, var_status in env_vars:
+        if var_status == "未设置":
+            st.warning(f"⚠️ {var_name}: {var_status}")
+        else:
+            st.success(f"✅ {var_name}: {var_status}")
+    
     if langsmith_client:
-        st.success(f"已连接到LangSmith")
-        st.info(f"项目: {langsmith_project}")
+        st.success("🔗 LangSmith客户端已连接")
+        
+        # 测试连接
+        if st.button("🧪 测试LangSmith连接", key="test_langsmith"):
+            try:
+                with st.spinner("测试连接中..."):
+                    projects = langsmith_client.list_projects()
+                    st.success("✅ 连接测试成功")
+                    st.write(f"发现 {len(list(projects))} 个项目")
+            except Exception as e:
+                st.error(f"❌ 连接测试失败: {str(e)}")
+        
         # 获取最近的运行记录
         try:
-            runs = langsmith_client.list_runs(
+            runs = list(langsmith_client.list_runs(
                 project_name=langsmith_project,
                 limit=5
-            )
+            ))
             if runs:
-                st.write("最近5次运行:")
+                st.write("**最近5次运行:**")
                 for run in runs:
-                    st.write(f"- {run.name} ({run.run_type}) - {run.status}")
-        except:
-            st.write("无法获取最近运行记录")
+                    status_icon = "✅" if run.status == "success" else "❌" if run.status == "error" else "🔄"
+                    st.write(f"{status_icon} {run.name} ({run.run_type}) - {run.status} - {run.start_time}")
+            else:
+                st.info("📭 暂无运行记录")
+        except Exception as e:
+            st.warning(f"⚠️ 无法获取运行记录: {str(e)}")
     else:
-        st.warning("LangSmith未配置")
-        st.info("如需启用AI监控，请设置LANGSMITH_API_KEY")
+        st.error("❌ LangSmith客户端未初始化")
+        st.info("💡 请确保在secrets.toml中正确配置LANGSMITH_API_KEY")
