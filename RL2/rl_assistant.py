@@ -388,16 +388,18 @@ def process_with_model(support_analyst_model, rl_assistant_model, rl_content, su
 # 处理单个完成调用
 def get_completion(system_prompt, user_prompt, model, temperature=0.7):
     try:
-        # 使用openai库调用OpenRouter API
-        response = openai.ChatCompletion.create(
+        # 使用openai库调用OpenRouter API (新版本语法)
+        client = openai.OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1"
+        )
+        response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
             temperature=temperature,
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1",
         )
         return response.choices[0].message
     except Exception as e:
