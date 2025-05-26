@@ -16,7 +16,6 @@ langchain-openai
 zhipuai
 beautifulsoup4
 openai
-mcp-client
 websockets
 mcp
 python-dotenv
