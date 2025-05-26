@@ -149,6 +149,16 @@ if "selected_rl_assistant_model" not in st.session_state:
 if "selected_letter_generator_model" not in st.session_state:
     st.session_state.selected_letter_generator_model = "qwen/qwen-max"  # 默认模型
 
+# 初始化处理状态相关的session state
+if "processing_complete" not in st.session_state:
+    st.session_state.processing_complete = False
+if "report" not in st.session_state:
+    st.session_state.report = ""
+if "recommendation_letter" not in st.session_state:
+    st.session_state.recommendation_letter = ""
+if "recommendation_letter_generated" not in st.session_state:
+    st.session_state.recommendation_letter_generated = False
+
 # 新增：支持文件分析agent的提示词
 if "support_analyst_persona" not in st.session_state:
     st.session_state.support_analyst_persona = """您是一位专业的文档分析专家，擅长从各类文件中提取和整合信息。您的任务是分析用户上传的辅助文档（如项目海报、报告或作品集），并生成标准化报告，用于简历顾问后续处理。您具备敏锐的信息捕捉能力和系统化的分析方法，能够从复杂文档中提取关键经历信息。"""
@@ -359,33 +369,13 @@ def process_with_model(support_analyst_model, rl_assistant_model, rl_content, su
         progress_bar.progress(100)
         status_text.text("处理完成！")
         
-        # 保存处理时间到session状态
+        # 保存报告到session state
+        st.session_state.report = report
+        st.session_state.processing_complete = True
         st.session_state.report_processing_time = total_time
         
         # 显示处理结果
         st.success(f"报告生成成功！总耗时 {int(total_time)} 秒")
-        st.session_state.processing_complete = True
-        st.session_state.current_view = "report"
-            
-        # 显示报告内容
-        st.markdown(report)
-            
-        # 添加生成推荐信按钮
-        if st.button("生成正式推荐信", key="generate_recommendation_letter", use_container_width=True):
-            letter, letter_gen_time = generate_recommendation_letter(report)
-            if letter:
-                st.session_state.recommendation_letter = letter
-                st.session_state.recommendation_letter_generated = True
-                st.session_state.letter_generation_time = letter_gen_time
-                st.success(f"推荐信已生成，用时 {letter_gen_time:.2f} 秒")
-                st.session_state.current_view = "recommendation_letter"
-                
-                # 创建报告和正式推荐信的标签页
-                report_tab, letter_tab = st.tabs(["分析报告", "最终推荐信"])
-                with report_tab:
-                    st.markdown(report)
-                with letter_tab:
-                    st.markdown(letter)
     
     except Exception as e:
         progress_bar.progress(100)
@@ -570,8 +560,28 @@ with TAB1:
                                       height=120)
     st.session_state.writing_requirements = writing_requirements
     
-    # 添加"开始生成"按钮
-    if st.button("开始生成", use_container_width=True):
+    # 添加按钮区域
+    if st.session_state.get("processing_complete", False):
+        col1, col2 = st.columns(2)
+        with col1:
+            start_new = st.button("重新开始", use_container_width=True)
+            if start_new:
+                # 清除之前的结果
+                st.session_state.processing_complete = False
+                st.session_state.report = ""
+                st.session_state.recommendation_letter = ""
+                st.session_state.recommendation_letter_generated = False
+                st.rerun()
+        with col2:
+            st.button("开始生成", disabled=True, use_container_width=True, help="已完成生成，如需重新生成请点击'重新开始'")
+    else:
+        # 添加"开始生成"按钮
+        start_generation = st.button("开始生成", use_container_width=True)
+    
+    if (not st.session_state.get("processing_complete", False) and 
+        st.session_state.get("start_generation", False)) or \
+       (not st.session_state.get("processing_complete", False) and 
+        locals().get("start_generation", False)):
         if not api_key:
             st.error("请在 Streamlit secrets 中配置 OPENROUTER_API_KEY")
         elif not rl_file:
@@ -605,6 +615,42 @@ with TAB1:
                 st.session_state.support_analyst_task,
                 st.session_state.support_analyst_output_format,
                 st.session_state.writing_requirements
+            )
+    
+    # 显示已生成的报告（如果存在）
+    if st.session_state.get("processing_complete", False) and st.session_state.get("report", ""):
+        st.markdown("---")
+        st.subheader("📋 生成结果")
+        
+        # 显示报告内容
+        st.markdown("**分析报告：**")
+        st.markdown(st.session_state.report)
+        
+        # 生成推荐信按钮
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("生成正式推荐信", key="generate_final_letter", use_container_width=True):
+                letter, letter_gen_time = generate_recommendation_letter(st.session_state.report)
+                if letter:
+                    st.session_state.recommendation_letter = letter
+                    st.session_state.recommendation_letter_generated = True
+                    st.session_state.letter_generation_time = letter_gen_time
+                    st.success(f"推荐信已生成，用时 {letter_gen_time:.2f} 秒")
+                    st.rerun()  # 刷新页面以显示新生成的推荐信
+        
+        # 显示已生成的推荐信（如果存在）
+        if st.session_state.get("recommendation_letter_generated", False) and st.session_state.get("recommendation_letter", ""):
+            st.markdown("---")
+            st.markdown("**最终推荐信：**")
+            st.markdown(st.session_state.recommendation_letter)
+            
+            # 添加下载按钮
+            st.download_button(
+                label="📥 下载推荐信",
+                data=st.session_state.recommendation_letter,
+                file_name="推荐信.txt",
+                mime="text/plain",
+                use_container_width=True
             )
 
 # 添加TAB2页面的实现
