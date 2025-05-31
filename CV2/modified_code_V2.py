@@ -326,9 +326,17 @@ if "selected_resume_generator_model" not in st.session_state:
 def get_model_list():
     model_str = st.secrets.get("OPENROUTER_MODEL", "")
     if model_str:
-        return [m.strip() for m in model_str.split(",") if m.strip()]
+        models = [m.strip() for m in model_str.split(",") if m.strip()]
     else:
-        return ["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324:free", "qwen-turbo", "其它模型..."]
+        models = ["qwen/qwen-max", "deepseek/deepseek-chat-v3-0324:free", "qwen-turbo", "其它模型..."]
+    
+    # 添加Gemini模型
+    if "google/gemini-2.5-flash-preview-05-20:thinking" not in models:
+        models.insert(0, "google/gemini-2.5-flash-preview-05-20:thinking")
+    if "google/gemini-2.5-flash-preview-05-20" not in models:
+        models.insert(1, "google/gemini-2.5-flash-preview-05-20")
+        
+    return models
 
 # 在get_model_list()函数定义之后初始化模型选择变量
 if "selected_support_analyst_model" not in st.session_state:
